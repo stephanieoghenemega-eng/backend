@@ -7,7 +7,8 @@ test('GET /api/listings rejects invalid category', async () => {
   const res = await fetch(`${BASE}/listings?category=invalid`);
   assert.equal(res.status, 400);
   const body = await res.json();
-  assert.ok(body.error.includes('Invalid category'));
+  assert.equal(body.error, 'Validation failed');
+  assert.ok(body.details.fieldErrors.category);
 });
 
 test('POST /api/listings requires seller_id, title, and price', async () => {

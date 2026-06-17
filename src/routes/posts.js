@@ -1,13 +1,14 @@
 const { Router } = require('express');
+const { escape } = require('html-escaper');
 const supabase   = require('../config/supabase');
+const { validate } = require('../middleware/validate');
+const { PostsQuerySchema, CreatePostSchema } = require('../validation/schemas');
 const router = Router();
 
-const PAGE_SIZE = 20;
-
 // GET /api/posts?cursor=<created_at>&limit=<n>
-router.get('/', async (req, res) => {
-  const { cursor, limit } = req.query;
-  const pageSize = Math.min(parseInt(limit) || PAGE_SIZE, 50);
+router.get('/', validate(PostsQuerySchema, 'query'), async (req, res) => {
+  const { cursor, limit } = req.query; // validated: cursor is ISO-8601, limit ∈ [1, 50]
+  const pageSize = limit;
 
   let query = supabase
     .from('posts')
@@ -28,14 +29,16 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/posts
-router.post('/', async (req, res) => {
+router.post('/', validate(CreatePostSchema), async (req, res) => {
   const { user_id, text, image_url, tagged_listing_id } = req.body;
-  if (!user_id || !text) return res.status(400).json({ error: 'user_id and text are required' });
-  if (text.length > 2000) return res.status(400).json({ error: 'text exceeds 2000 character limit' });
+
+  // HTML-encode user-supplied text before storage to neutralise stored XSS
+  // payloads regardless of how a client later renders the feed.
+  const safeText = escape(text);
 
   const { data, error } = await supabase
     .from('posts')
-    .insert({ user_id, text, image_url, tagged_listing_id })
+    .insert({ user_id, text: safeText, image_url, tagged_listing_id })
     .select()
     .single();
 

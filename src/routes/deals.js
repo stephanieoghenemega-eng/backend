@@ -1,16 +1,16 @@
 const { Router } = require('express');
 const supabase   = require('../config/supabase');
 const { lockFunds, releaseFunds, refund } = require('../services/escrow');
+const { validate } = require('../middleware/validate');
+const { CreateDealSchema, DealsQuerySchema } = require('../validation/schemas');
 const router = Router();
 
 const ESCROW_SECRET = process.env.ESCROW_SECRET_KEY;
 const ESCROW_PUBLIC = process.env.ESCROW_PUBLIC_KEY;
 
 // POST /api/deals
-router.post('/', async (req, res) => {
+router.post('/', validate(CreateDealSchema), async (req, res) => {
   const { buyerSecret, seller, amount, description } = req.body;
-  if (!buyerSecret || !seller || !amount || !description)
-    return res.status(400).json({ error: 'Missing required fields' });
 
   try {
     const { StellarSdk } = require('../config/stellar');
@@ -33,9 +33,8 @@ router.post('/', async (req, res) => {
 });
 
 // GET /api/deals?userId=
-router.get('/', async (req, res) => {
+router.get('/', validate(DealsQuerySchema, 'query'), async (req, res) => {
   const { userId } = req.query;
-  if (!userId) return res.status(400).json({ error: 'userId required' });
 
   const { data, error } = await supabase
     .from('deals')
