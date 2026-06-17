@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const supabase   = require('../config/supabase');
 const { validate } = require('../middleware/validate');
-const { ListingsQuerySchema, CreateListingSchema } = require('../validation/schemas');
+const { IdParamSchema, ListingsQuerySchema, CreateListingSchema } = require('../validation/schemas');
 const router = Router();
 
 // GET /api/listings
@@ -46,7 +46,7 @@ router.post('/', validate(CreateListingSchema), async (req, res) => {
 });
 
 // GET /api/listings/:id
-router.get('/:id', async (req, res) => {
+router.get('/:id', validate(IdParamSchema, 'params'), async (req, res) => {
   const { data, error } = await supabase
     .from('listings')
     .select('*, users(handle, display_name, avatar_url)')

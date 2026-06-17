@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
 const {
+  IdParamSchema,
   PostsQuerySchema,
   CreatePostSchema,
   ListingsQuerySchema,
@@ -11,7 +12,12 @@ const {
   MessagesQuerySchema,
   CreateMessageSchema,
   DealsQuerySchema,
+  BuyerSecretHeaderSchema,
   CreateDealSchema,
+  ShipDealSchema,
+  ConfirmDealSchema,
+  CancelDealSchema,
+  DisputeDealSchema,
   CreateUserSchema,
   RoleSchema,
 } = require('../src/validation/schemas');
@@ -42,12 +48,24 @@ test('PostsQuerySchema: rejects out-of-range limits and the parseInt-prefix inje
   assert.equal(PostsQuerySchema.safeParse({ limit: '3.5' }).success, false);
 });
 
-test('PostsQuerySchema: any accepted limit is a clamped integer, never a raw string', () => {
-  // "0x1F" coerces to the safe integer 31 — a number, so no SQL fragment survives.
-  const r = PostsQuerySchema.safeParse({ limit: '0x1F' });
+test('PostsQuerySchema: rejects non-decimal numeric forms (hex, scientific)', () => {
+  // Only plain decimal-digit strings are accepted, so these never reach a query.
+  assert.equal(PostsQuerySchema.safeParse({ limit: '0x1F' }).success, false);
+  assert.equal(PostsQuerySchema.safeParse({ limit: '1e3' }).success, false);
+});
+
+test('PostsQuerySchema: an accepted limit is a clamped integer, never a raw string', () => {
+  const r = PostsQuerySchema.safeParse({ limit: '25' });
   assert.ok(r.success);
-  assert.equal(r.data.limit, 31);
+  assert.equal(r.data.limit, 25);
   assert.equal(typeof r.data.limit, 'number');
+});
+
+// IdParamSchema -------------------------------------------------------------
+test('IdParamSchema: accepts a UUID and rejects malformed ids', () => {
+  assert.ok(IdParamSchema.safeParse({ id: UUID }).success);
+  assert.equal(IdParamSchema.safeParse({ id: 'nonexistent-id-00000' }).success, false);
+  assert.equal(IdParamSchema.safeParse({ id: '123' }).success, false);
 });
 
 test('PostsQuerySchema: coerces a valid in-range limit to a number', () => {
@@ -117,15 +135,37 @@ test('CreateConversationSchema/CreateMessageSchema: validate ids and body', () =
 });
 
 // deals schemas -------------------------------------------------------------
-test('CreateDealSchema: rejects bad amounts and bad keys', () => {
-  const base = { buyerSecret: SECRET, seller: PUBLIC, description: 'widgets' };
+test('CreateDealSchema: rejects bad amounts and bad keys (no secret in body)', () => {
+  const base = { seller: PUBLIC, description: 'widgets' };
   assert.ok(CreateDealSchema.safeParse({ ...base, amount: '100' }).success);
   assert.equal(CreateDealSchema.safeParse({ ...base, amount: '-5' }).success, false);
   assert.equal(CreateDealSchema.safeParse({ ...base, amount: 'Infinity' }).success, false);
   assert.equal(CreateDealSchema.safeParse({ ...base, amount: 'abc' }).success, false);
   assert.equal(CreateDealSchema.safeParse({ ...base, amount: '0' }).success, false);
-  assert.equal(CreateDealSchema.safeParse({ buyerSecret: 'nope', seller: PUBLIC, amount: '1', description: 'x' }).success, false);
-  assert.equal(CreateDealSchema.safeParse({ buyerSecret: SECRET, seller: 'G123', amount: '1', description: 'x' }).success, false);
+  assert.equal(CreateDealSchema.safeParse({ seller: 'G123', amount: '1', description: 'x' }).success, false);
+});
+
+test('CreateDealSchema: a secret in the body is ignored, not stored', () => {
+  // Object schemas strip unknown keys, so a stray buyerSecret never reaches req.body.
+  const r = CreateDealSchema.safeParse({ seller: PUBLIC, amount: '5', description: 'x', buyerSecret: SECRET });
+  assert.ok(r.success);
+  assert.equal('buyerSecret' in r.data, false);
+});
+
+test('BuyerSecretHeaderSchema: requires a well-formed Stellar secret header', () => {
+  assert.ok(BuyerSecretHeaderSchema.safeParse({ 'x-buyer-secret': SECRET }).success);
+  assert.equal(BuyerSecretHeaderSchema.safeParse({ 'x-buyer-secret': 'nope' }).success, false);
+  assert.equal(BuyerSecretHeaderSchema.safeParse({}).success, false);
+});
+
+test('Deal state-change schemas validate the caller key as a Stellar public key', () => {
+  assert.ok(ShipDealSchema.safeParse({ sellerId: PUBLIC }).success);
+  assert.equal(ShipDealSchema.safeParse({ sellerId: 'GBUYER123' }).success, false);
+  assert.ok(ConfirmDealSchema.safeParse({ buyerId: PUBLIC }).success);
+  assert.equal(ConfirmDealSchema.safeParse({ buyerId: 'nope' }).success, false);
+  assert.ok(CancelDealSchema.safeParse({ buyerId: PUBLIC }).success);
+  assert.ok(DisputeDealSchema.safeParse({ callerId: PUBLIC }).success);
+  assert.equal(DisputeDealSchema.safeParse({}).success, false);
 });
 
 test('DealsQuerySchema: requires a Stellar public key', () => {

@@ -18,7 +18,13 @@ function validate(schema, source = 'body') {
         details: result.error.flatten(),
       });
     }
-    req[source] = result.data; // replace with parsed, typed data
+    if (source === 'headers') {
+      // Merge validated values back; never replace the whole headers object,
+      // which would drop every header the schema doesn't describe.
+      Object.assign(req[source], result.data);
+    } else {
+      req[source] = result.data; // replace with parsed, typed data
+    }
     next();
   };
 }

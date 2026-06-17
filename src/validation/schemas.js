@@ -14,10 +14,24 @@ const uuid = z.string().uuid();
 
 const isoDateTime = z.iso.datetime({ offset: true });
 
+// Pagination `limit`: query params arrive as strings, so only accept a plain
+// decimal-digit string (or an actual number) — this rejects hex/scientific
+// forms like "0x1F" or "1e3" that z.coerce.number() would otherwise accept,
+// then clamps to [1, 50] as an integer.
+const pageLimit = z
+  .union([z.number(), z.string().regex(/^\d+$/, 'limit must be a positive integer')])
+  .pipe(z.coerce.number().int().min(1).max(50))
+  .default(20);
+
 const pagination = {
   cursor: isoDateTime.optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  limit: pageLimit,
 };
+
+// A bare resource id used in a route param (e.g. /:id). Validating it as a
+// UUID turns a malformed id into a clean 400 instead of a Postgres type error
+// surfacing as a generic 500.
+const IdParamSchema = z.object({ id: uuid });
 
 const VALID_CATEGORIES = [
   'electronics', 'fashion', 'home', 'beauty',
@@ -103,12 +117,29 @@ const DealsQuerySchema = z.object({
   userId: stellarPublicKey,
 });
 
+// The buyer's Stellar secret is required for server-side signing but must NOT
+// travel in the JSON body, where it would be captured verbatim by request
+// logging, error stacks, and APM/tracing layers. It is carried in a dedicated
+// header that the logging pipeline is expected to redact (see deals.js).
+// NOTE: the long-term fix is client-side signing — the client submits a signed
+// XDR envelope and the secret never reaches the server at all.
+const BuyerSecretHeaderSchema = z.object({
+  'x-buyer-secret': stellarSecretKey,
+});
+
 const CreateDealSchema = z.object({
-  buyerSecret: stellarSecretKey,
   seller: stellarPublicKey,
   amount: price,
   description: z.string().min(1).max(2000),
 });
+
+// State-machine transitions carry the caller's Stellar public key, which is
+// used for the authorization check (buyer/seller match). Validate the format
+// before it reaches that check — the same guarantee the create path has.
+const ShipDealSchema    = z.object({ sellerId: stellarPublicKey });
+const ConfirmDealSchema = z.object({ buyerId: stellarPublicKey });
+const CancelDealSchema  = z.object({ buyerId: stellarPublicKey });
+const DisputeDealSchema = z.object({ callerId: stellarPublicKey });
 
 // users ---------------------------------------------------------------------
 
@@ -125,6 +156,7 @@ const RoleSchema = z.object({
 
 module.exports = {
   VALID_CATEGORIES,
+  IdParamSchema,
   PostsQuerySchema,
   CreatePostSchema,
   ListingsQuerySchema,
@@ -134,7 +166,12 @@ module.exports = {
   MessagesQuerySchema,
   CreateMessageSchema,
   DealsQuerySchema,
+  BuyerSecretHeaderSchema,
   CreateDealSchema,
+  ShipDealSchema,
+  ConfirmDealSchema,
+  CancelDealSchema,
+  DisputeDealSchema,
   CreateUserSchema,
   RoleSchema,
 };

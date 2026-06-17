@@ -2,7 +2,7 @@ const { Router } = require('express');
 const { escape } = require('html-escaper');
 const supabase   = require('../config/supabase');
 const { validate } = require('../middleware/validate');
-const { PostsQuerySchema, CreatePostSchema } = require('../validation/schemas');
+const { IdParamSchema, PostsQuerySchema, CreatePostSchema } = require('../validation/schemas');
 const router = Router();
 
 // GET /api/posts?cursor=<created_at>&limit=<n>
@@ -32,8 +32,13 @@ router.get('/', validate(PostsQuerySchema, 'query'), async (req, res) => {
 router.post('/', validate(CreatePostSchema), async (req, res) => {
   const { user_id, text, image_url, tagged_listing_id } = req.body;
 
-  // HTML-encode user-supplied text before storage to neutralise stored XSS
-  // payloads regardless of how a client later renders the feed.
+  // HTML-encode user-supplied text before storage to neutralise stored XSS.
+  // ASSUMPTION: the rendering layer is an HTML/browser context. This trades a
+  // little fidelity for safety — non-HTML consumers (mobile, plain-text email,
+  // PDF) receive encoded entities, and re-encoding elsewhere risks double
+  // encoding. The cleaner long-term approach is encode-on-output plus a CSP
+  // header; this stays here so the backend is safe by default regardless of
+  // what any single client does.
   const safeText = escape(text);
 
   const { data, error } = await supabase
@@ -47,7 +52,7 @@ router.post('/', validate(CreatePostSchema), async (req, res) => {
 });
 
 // POST /api/posts/:id/like
-router.post('/:id/like', async (req, res) => {
+router.post('/:id/like', validate(IdParamSchema, 'params'), async (req, res) => {
   const { id } = req.params;
 
   const { data: post, error: fetchErr } = await supabase
