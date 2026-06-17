@@ -91,9 +91,12 @@ router.post('/:id/confirm', async (req, res) => {
     return res.json({ success: true, status: 'confirmed', tx_hash: deal.release_tx });
   }
 
-  if (deal.status === 'confirming' && deal.release_tx) {
-    await supabase.from('deals').update({ status: 'confirmed' }).eq('id', id);
-    return res.json({ success: true, status: 'confirmed', tx_hash: deal.release_tx });
+  if (deal.status === 'confirming') {
+    if (deal.release_tx) {
+      await supabase.from('deals').update({ status: 'confirmed' }).eq('id', id);
+      return res.json({ success: true, status: 'confirmed', tx_hash: deal.release_tx });
+    }
+    return res.status(409).json({ error: 'Deal confirmation already in progress' });
   }
 
   if (deal.status !== 'shipped') {
@@ -156,9 +159,12 @@ router.post('/:id/cancel', async (req, res) => {
     return res.json({ success: true, status: 'cancelled', tx_hash: deal.refund_tx });
   }
 
-  if (deal.status === 'cancelling' && deal.refund_tx) {
-    await supabase.from('deals').update({ status: 'cancelled' }).eq('id', id);
-    return res.json({ success: true, status: 'cancelled', tx_hash: deal.refund_tx });
+  if (deal.status === 'cancelling') {
+    if (deal.refund_tx) {
+      await supabase.from('deals').update({ status: 'cancelled' }).eq('id', id);
+      return res.json({ success: true, status: 'cancelled', tx_hash: deal.refund_tx });
+    }
+    return res.status(409).json({ error: 'Deal cancellation already in progress' });
   }
 
   if (deal.status !== 'created') {
