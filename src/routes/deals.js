@@ -86,11 +86,36 @@ router.post('/:id/confirm', async (req, res) => {
     .from('deals').select('*').eq('id', id).single();
   if (fetchErr) return res.status(404).json({ error: 'Deal not found' });
   if (deal.buyer !== buyerId) return res.status(403).json({ error: 'Not the buyer' });
-  if (deal.status !== 'shipped') return res.status(400).json({ error: 'Invalid deal status' });
+
+  if (deal.status === 'confirmed') {
+    return res.json({ success: true, status: 'confirmed', tx_hash: deal.release_tx });
+  }
+
+  if (deal.status === 'confirming' && deal.release_tx) {
+    await supabase.from('deals').update({ status: 'confirmed' }).eq('id', id);
+    return res.json({ success: true, status: 'confirmed', tx_hash: deal.release_tx });
+  }
+
+  if (deal.status !== 'shipped') {
+    return res.status(400).json({ error: 'Invalid deal status' });
+  }
+
+  const { data: locked, error: lockErr } = await supabase
+    .from('deals')
+    .update({ status: 'confirming' })
+    .eq('id', id)
+    .eq('status', 'shipped')
+    .select()
+    .single();
+
+  if (lockErr || !locked) {
+    return res.status(409).json({ error: 'Deal confirmation already in progress' });
+  }
 
   try {
-    const txHash = await releaseFunds(ESCROW_SECRET, deal.seller, deal.amount, id);
-    await supabase.from('deals').update({ status: 'confirmed', release_tx: txHash }).eq('id', id);
+    const txHash = await releaseFunds(ESCROW_SECRET, locked.seller, locked.amount, id);
+    await supabase.from('deals').update({ release_tx: txHash }).eq('id', id);
+    await supabase.from('deals').update({ status: 'confirmed' }).eq('id', id);
     res.json({ success: true, status: 'confirmed', tx_hash: txHash });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -126,11 +151,36 @@ router.post('/:id/cancel', async (req, res) => {
     .from('deals').select('*').eq('id', id).single();
   if (fetchErr) return res.status(404).json({ error: 'Deal not found' });
   if (deal.buyer !== buyerId) return res.status(403).json({ error: 'Not the buyer' });
-  if (deal.status !== 'created') return res.status(400).json({ error: 'Can only cancel before shipment' });
+
+  if (deal.status === 'cancelled') {
+    return res.json({ success: true, status: 'cancelled', tx_hash: deal.refund_tx });
+  }
+
+  if (deal.status === 'cancelling' && deal.refund_tx) {
+    await supabase.from('deals').update({ status: 'cancelled' }).eq('id', id);
+    return res.json({ success: true, status: 'cancelled', tx_hash: deal.refund_tx });
+  }
+
+  if (deal.status !== 'created') {
+    return res.status(400).json({ error: 'Can only cancel before shipment' });
+  }
+
+  const { data: locked, error: lockErr } = await supabase
+    .from('deals')
+    .update({ status: 'cancelling' })
+    .eq('id', id)
+    .eq('status', 'created')
+    .select()
+    .single();
+
+  if (lockErr || !locked) {
+    return res.status(409).json({ error: 'Deal cancellation already in progress' });
+  }
 
   try {
-    const txHash = await refund(ESCROW_SECRET, deal.buyer, deal.amount, id);
-    await supabase.from('deals').update({ status: 'cancelled', refund_tx: txHash }).eq('id', id);
+    const txHash = await refund(ESCROW_SECRET, locked.buyer, locked.amount, id);
+    await supabase.from('deals').update({ refund_tx: txHash }).eq('id', id);
+    await supabase.from('deals').update({ status: 'cancelled' }).eq('id', id);
     res.json({ success: true, status: 'cancelled', tx_hash: txHash });
   } catch (err) {
     res.status(500).json({ error: err.message });
